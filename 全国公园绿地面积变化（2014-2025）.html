@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国公园绿地面积变化 - 年份下拉切换</title>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+        /* 页眉（标题栏）- 横贯顶部 */
+        .app-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: linear-gradient(135deg, #1a4d6e, #0e3a54);
+            backdrop-filter: blur(12px);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-family: 'Segoe UI', 'PingFang SC', Roboto, sans-serif;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .app-header h1 {
+            font-size: 18px;
+            font-weight: 500;
+            margin: 0;
+        }
+        .app-header .sub {
+            font-size: 13px;
+            opacity: 0.85;
+        }
+        #viewDiv {
+            height: 100%;
+            width: 100%;
+            position: relative;
+        }
+        /* 右侧控制面板 - 增加上边距避免被页眉遮挡 */
+        .control-panel {
+            position: absolute;
+            top: 72px;
+            right: 20px;
+            width: 320px;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            padding: 16px;
+            z-index: 99;
+            font-family: 'Segoe UI', sans-serif;
+            max-height: calc(100% - 100px);
+            overflow-y: auto;
+        }
+        /* 解决页眉遮挡左上角缩放按钮的问题 */
+        .esri-ui-corner .esri-component {
+            margin-top: 56px !important;
+        }
+        
+        .control-panel h3 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            color: #2c7cb0;
+            border-left: 4px solid #2c7cb0;
+            padding-left: 10px;
+        }
+        .widget-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            color: #2c7cb0;
+        }
+        select, button {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 30px;
+            border: 1px solid #ccc;
+            background: white;
+            cursor: pointer;
+        }
+        button {
+            background: #2c7cb0;
+            color: white;
+            font-weight: bold;
+            border: none;
+        }
+        button:hover {
+            background: #1e5a7d;
+        }
+        hr {
+            margin: 12px 0;
+            border-color: #e0e4e8;
+        }
+        @media (max-width: 550px) {
+            .control-panel { width: 280px; top: 66px; right: 12px; padding: 12px; }
+            .app-header { padding: 0 16px; }
+            .app-header h1 { font-size: 15px; }
+        }
+    </style>
+    <script src="https://js.arcgis.com/4.34/"></script>
+</head>
+<body>
+    <div class="app-header">
+        <h1>🌳 全国城市公园绿地面积变化 (2014-2025)</h1>
+        <div class="sub">底图：天地图</div>
+    </div>
+
+    <div id="viewDiv"></div>
+
+    <div class="control-panel">
+        <h3>🗂️ 年份选择</h3>
+        <select id="yearSelect"></select>
+        <div class="widget-title">📊 图例</div>
+        <div id="legendDiv"></div>
+        <hr>
+        <div class="widget-title">📂 图层列表</div>
+        <div id="layerListDiv"></div>
+        <hr>
+        <div class="widget-title">🗺️ 切换底图</div>
+        <div id="basemapGalleryDiv"></div>
+    </div>
+
+    <script>
+        require([
+            "esri/Map", "esri/views/MapView", "esri/layers/WebTileLayer", "esri/layers/FeatureLayer",
+            "esri/widgets/BasemapGallery", "esri/widgets/LayerList", "esri/widgets/Legend",
+            "esri/widgets/ScaleBar", "esri/widgets/Search",
+            "esri/renderers/SimpleRenderer", "esri/symbols/SimpleFillSymbol", "esri/Color"
+        ], function(Map, MapView, WebTileLayer, FeatureLayer,
+                    BasemapGallery, LayerList, Legend, ScaleBar, Search,
+                    SimpleRenderer, SimpleFillSymbol, Color) {
+
+            // ========== 1. 天地图底图（CGCS2000 矢量） ==========
+            const TIANDITU_KEY = "f20350d19f8fbc6f5fdd09ea241b4b5c";  // 请替换为你的天地图密钥
+            const tiandituVec = new WebTileLayer({
+                urlTemplate: `https://t{subDomain}.tianditu.gov.cn/vec_c/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=c&FORMAT=tiles&TILEMATRIX={level}&TILEROW={row}&TILECOL={col}&tk=${TIANDITU_KEY}`,
+                subDomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+                copyright: "天地图",
+                spatialReference: { wkid: 4490 }
+            });
+            const tiandituCva = new WebTileLayer({
+                urlTemplate: `https://t{subDomain}.tianditu.gov.cn/cva_c/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=c&FORMAT=tiles&TILEMATRIX={level}&TILEROW={row}&TILECOL={col}&tk=${TIANDITU_KEY}`,
+                subDomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+                copyright: "天地图",
+                spatialReference: { wkid: 4490 }
+            });
+
+            // ========== 2. 定义十二个年份的独立图层（全国数据） ==========
+            const yearLayers = [
+                { year: 2014, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/1" },
+                { year: 2015, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/2" },
+                { year: 2016, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/3" },
+                { year: 2017, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/4" },
+                { year: 2018, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/5" },
+                { year: 2019, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/6" },
+                { year: 2020, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/7" },
+                { year: 2021, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/8" },
+                { year: 2022, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/9" },
+                { year: 2023, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/10" },
+                { year: 2024, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/11" },
+                { year: 2025, url: "https://www.geosceneonline.cn/server/rest/services/Hosted/2014至2025全国公园绿地面积变化/FeatureServer/12" }
+            ];
+
+            // 深绿色填充（突出绿地）
+            const darkGreenFill = new SimpleFillSymbol({
+                color: new Color([0, 100, 0, 0.85]),
+                outline: { width: 0, color: "white" }
+            });
+
+            const layers = [];
+            yearLayers.forEach(item => {
+                const layer = new FeatureLayer({
+                    url: item.url,
+                    title: `${item.year}年公园绿地`,
+                    outFields: ["*"],
+                    visible: false,
+                    renderer: new SimpleRenderer({ symbol: darkGreenFill }),
+                    popupTemplate: {
+                        title: "{name}",
+                        content: `年份: ${item.year}<br>绿地面积等详情`
+                    }
+                });
+                layers.push(layer);
+            });
+
+            const map = new Map({
+                layers: [tiandituVec, tiandituCva, ...layers]
+            });
+
+            // ========== 3. 地图视图：全国范围，中心点为中国地理中心，缩放级别5 ==========
+            const view = new MapView({
+                container: "viewDiv",
+                map: map,
+                center: [104.0, 35.0],   // 中国大致中心（经度104，纬度35）
+                zoom: 4,                 // 缩放至全国可见
+                constraints: { snapToZoom: false }
+            });
+
+            // ========== 4. 添加微件 ==========
+            const scaleBar = new ScaleBar({ view, unit: "metric", style: "ruler" });
+            view.ui.add(scaleBar, "bottom-left");
+
+            const search = new Search({ view });
+            view.ui.add(search, "top-left");
+
+            const basemapGallery = new BasemapGallery({ view });
+            basemapGallery.container = "basemapGalleryDiv";
+
+            const layerList = new LayerList({ view });
+            layerList.container = "layerListDiv";
+
+            const legend = new Legend({ view });
+            legend.container = "legendDiv";
+
+            // ========== 5. 年份下拉菜单逻辑（完全不变） ==========
+            const select = document.getElementById("yearSelect");
+            yearLayers.forEach(item => {
+                const option = document.createElement("option");
+                option.value = item.year;
+                option.text = `${item.year}年`;
+                select.appendChild(option);
+            });
+
+            if (yearLayers.length) {
+                select.value = yearLayers[0].year;
+                showLayer(yearLayers[0].year);
+            }
+
+            select.addEventListener("change", (e) => {
+                const year = parseInt(e.target.value);
+                showLayer(year);
+            });
+
+            function showLayer(year) {
+                layers.forEach(layer => { layer.visible = false; });
+                const targetLayer = layers.find((_, idx) => yearLayers[idx].year === year);
+                if (targetLayer) targetLayer.visible = true;
+            }
+
+            view.when(() => {
+                console.log("地图加载成功，视野：全国范围");
+            }).catch(err => {
+                console.error("地图加载失败", err);
+                alert("请确保使用本地服务器访问，且图层URL和天地图密钥正确。");
+            });
+        });
+    </script>
+</body>
+</html>
